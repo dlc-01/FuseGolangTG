@@ -2,13 +2,15 @@ package main
 
 import (
 	"flag"
+	filesystem_adapter "github.com/dlc-01/adapters/filesystem"
+	telegram_adapter "github.com/dlc-01/adapters/telegram"
+	"github.com/dlc-01/application/services"
 	"github.com/dlc-01/config"
-	"github.com/dlc-01/filesystem"
-	"github.com/dlc-01/telegram"
+	"github.com/dlc-01/domain"
 	"log"
-
-	"bazil.org/fuse"
-	fusefs "bazil.org/fuse/fs"
+	"os"
+	"os/signal"
+	"syscall"
 )
 
 func main() {
@@ -24,35 +26,31 @@ func main() {
 	}
 
 	// Initialize Telegram Service
-	tgService, err := telegram.NewTelegramService(cfg)
+	tgService, err := telegram_adapter.NewTelegramAdapter(cfg)
 	if err != nil {
 		log.Fatalf("Error creating Telegram service: %v", err)
 	}
 
-	// Mount FUSE filesystem
-	fuseConn, err := fuse.Mount(
-		*mountpoint,
-		fuse.FSName("telegramfs"),
-		fuse.Subtype("telegramfs"),
-	)
-	if err != nil {
-		log.Fatalf("Error mounting FUSE filesystem: %v", err)
-	}
-	defer fuseConn.Close()
-
-	fs := &filesystem.FileSystem{
+	// Initialize FileSystem Adapter
+	fsAdapter := &filesystem_adapter.FileSystemAdapter{
 		TelegramService: tgService,
-		Files:           make(map[string]filesystem.File),
-		FuseConn:        fuseConn,
+		Files:           make(map[string]domain.File),
 	}
 
-	filesys := filesystem.FS{FileSystem: fs}
-	if err := fusefs.Serve(fuseConn, filesys); err != nil {
-		log.Fatalf("Error serving FUSE filesystem: %v", err)
-	}
+	// Initialize FileSystem Service
+	fsService := services.NewFileSystemService(tgService, fsAdapter, *mountpoint)
 
-	// Wait for unmount.
-	if err := fuseConn.Close(); err != nil {
-		log.Fatalf("Mount process has exited with error: %v", err)
-	}
+	// Set up signal handling to ensure clean shutdown
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		if err := fsService.Serve(); err != nil {
+			log.Fatalf("Error serving FUSE filesystem: %v", err)
+		}
+	}()
+
+	<-stop
+	log.Println("Shutting down the FUSE filesystem service...")
+	fsService.Shutdown()
 }
