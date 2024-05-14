@@ -1,132 +1,82 @@
-package telegram_adapter
+package telegram
 
 import (
-	"bufio"
 	"fmt"
 	"github.com/dlc-01/config"
+	"github.com/dlc-01/ports"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"io/ioutil"
-	"log"
 	"net/http"
-	"os"
-	"strings"
-
-	"github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
 type TelegramAdapter struct {
-	Bot    *tgbotapi.BotAPI
-	Config config.Config
+	bot         *tgbotapi.BotAPI
+	chatID      int64
+	storagePort ports.FileStoragePort
 }
 
-func NewTelegramAdapter(cfg config.Config) (*TelegramAdapter, error) {
+func NewTelegramAdapter(cfg *config.Config, storagePort ports.FileStoragePort) (ports.TelegramPort, error) {
 	bot, err := tgbotapi.NewBotAPI(cfg.TelegramToken)
 	if err != nil {
 		return nil, err
 	}
-	return &TelegramAdapter{Bot: bot, Config: cfg}, nil
+
+	return &TelegramAdapter{
+		bot:         bot,
+		chatID:      cfg.TelegramChatID,
+		storagePort: storagePort,
+	}, nil
 }
 
-func (s *TelegramAdapter) DeleteMessage(fileID string) error {
-	messageID := s.FindMessageIDByFileID(fileID)
-	if messageID == 0 {
-		return fmt.Errorf("message with file ID %s not found", fileID)
+func (s *TelegramAdapter) UploadFile(filename string, data []byte, tag string) (string, int, error) {
+	fileBytes := tgbotapi.FileBytes{Name: filename, Bytes: data}
+	msg := tgbotapi.NewDocument(s.chatID, fileBytes)
+	msg.Caption = tag
+
+	message, err := s.bot.Send(msg)
+	if err != nil {
+		return "", 0, fmt.Errorf("failed to upload file: %w", err)
 	}
 
-	deleteMsg := tgbotapi.NewDeleteMessage(s.Config.TelegramChatID, messageID)
-	_, err := s.Bot.Send(deleteMsg)
-	return err
+	return message.Document.FileID, message.MessageID, nil
 }
 
-func (s *TelegramAdapter) FindMessageIDByFileID(fileID string) int {
-	file, err := os.Open(s.Config.MappingFile)
-	if err != nil {
-		log.Fatalf("Failed to open mapping file: %v", err)
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := scanner.Text()
-		parts := strings.Split(line, ":")
-		if len(parts) == 2 && parts[0] == fileID {
-			var messageID int
-			fmt.Sscanf(parts[1], "%d", &messageID)
-			return messageID
-		}
-	}
-	return 0
-}
-
-func (s *TelegramAdapter) SaveMapping(fileID string, messageID int) {
-	file, err := os.OpenFile(s.Config.MappingFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		log.Fatalf("Failed to open mapping file: %v", err)
-	}
-	defer file.Close()
-
-	writer := bufio.NewWriter(file)
-	_, err = writer.WriteString(fmt.Sprintf("%s:%d\n", fileID, messageID))
-	if err != nil {
-		log.Fatalf("Failed to write to mapping file: %v", err)
-	}
-	writer.Flush()
-}
-
-func (s *TelegramAdapter) RemoveMapping(fileID string) {
-	input, err := ioutil.ReadFile(s.Config.MappingFile)
-	if err != nil {
-		log.Fatalf("Failed to read mapping file: %v", err)
-	}
-
-	lines := strings.Split(string(input), "\n")
-	var output []string
-	for _, line := range lines {
-		if !strings.HasPrefix(line, fileID+":") {
-			output = append(output, line)
-		}
-	}
-
-	err = ioutil.WriteFile(s.Config.MappingFile, []byte(strings.Join(output, "\n")), 0644)
-	if err != nil {
-		log.Fatalf("Failed to write mapping file: %v", err)
-	}
-}
-
-func (s *TelegramAdapter) FetchFile(fileID string) ([]byte, error) {
+func (s *TelegramAdapter) DownloadFile(fileID string) ([]byte, error) {
 	fileConfig := tgbotapi.FileConfig{FileID: fileID}
-	tgFile, err := s.Bot.GetFile(fileConfig)
+	tgFile, err := s.bot.GetFile(fileConfig)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get file: %w", err)
 	}
 
-	fileURL := fmt.Sprintf("https://api.telegram.org/file/bot%s/%s", s.Config.TelegramToken, tgFile.FilePath)
+	fileURL := fmt.Sprintf("https://api.telegram.org/file/bot%s/%s", s.bot.Token, tgFile.FilePath)
 	resp, err := http.Get(fileURL)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to download file: %w", err)
 	}
 	defer resp.Body.Close()
 
 	data, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read file data: %w", err)
 	}
 
 	return data, nil
 }
 
-func (s *TelegramAdapter) UploadFile(fileName string, fileBytes []byte, tag string) (string, int, error) {
-	msg := tgbotapi.NewDocument(s.Config.TelegramChatID, tgbotapi.FileBytes{Name: fileName, Bytes: fileBytes})
-	message, err := s.Bot.Send(msg)
+func (s *TelegramAdapter) DeleteFile(fileID string) error {
+	msgID, err := s.FindMessageIDByFileID(fileID)
 	if err != nil {
-		return "", 0, err
+		return fmt.Errorf("failed to find message ID: %w", err)
 	}
 
-	caption := fmt.Sprintf("#%s", tag)
-	editMsg := tgbotapi.NewEditMessageCaption(s.Config.TelegramChatID, message.MessageID, caption)
-	_, err = s.Bot.Send(editMsg)
-	if err != nil {
-		return "", 0, err
-	}
+	_, err = s.bot.Send(tgbotapi.DeleteMessageConfig{ChatID: s.chatID, MessageID: msgID})
+	return err
+}
 
-	return message.Document.FileID, message.MessageID, nil
+func (s *TelegramAdapter) SaveMapping(fileID string, messageID int) error {
+	return s.storagePort.SaveMapping(fileID, messageID)
+}
+
+func (s *TelegramAdapter) FindMessageIDByFileID(fileID string) (int, error) {
+	return s.storagePort.FindMessageIDByFileID(fileID)
 }

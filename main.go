@@ -2,11 +2,11 @@ package main
 
 import (
 	"flag"
-	filesystem_adapter "github.com/dlc-01/adapters/filesystem"
-	telegram_adapter "github.com/dlc-01/adapters/telegram"
+	"github.com/dlc-01/adapters/filesystem"
+	"github.com/dlc-01/adapters/postgres"
+	"github.com/dlc-01/adapters/telegram"
 	"github.com/dlc-01/application/services"
 	"github.com/dlc-01/config"
-	"github.com/dlc-01/domain"
 	"log"
 	"os"
 	"os/signal"
@@ -14,43 +14,43 @@ import (
 )
 
 func main() {
-	// Parse command-line flags
 	mountpoint := flag.String("mountpoint", "./mnt", "directory to mount the filesystem")
 	configFile := flag.String("config", "config.json", "path to the configuration file")
 	flag.Parse()
 
-	// Load configuration
 	cfg, err := config.LoadConfig(*configFile)
 	if err != nil {
 		log.Fatalf("Error loading configuration: %v", err)
 	}
 
-	// Initialize Telegram Service
-	tgService, err := telegram_adapter.NewTelegramAdapter(cfg)
+	storageAdapter, err := postgres.NewPostgresAdapter(cfg)
 	if err != nil {
-		log.Fatalf("Error creating Telegram service: %v", err)
+		log.Fatalf("Error creating storage adapter: %v", err)
 	}
 
-	// Initialize FileSystem Adapter
-	fsAdapter := &filesystem_adapter.FileSystemAdapter{
-		TelegramService: tgService,
-		Files:           make(map[string]domain.File),
+	tgAdapter, err := telegram.NewTelegramAdapter(cfg, storageAdapter)
+	if err != nil {
+		log.Fatalf("Error creating Telegram adapter: %v", err)
 	}
 
-	// Initialize FileSystem Service
-	fsService := services.NewFileSystemService(tgService, fsAdapter, *mountpoint)
+	fsAdapter := filesystem.NewFileSystemAdapter(storageAdapter)
 
-	// Set up signal handling to ensure clean shutdown
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+	fileService := services.NewFileSystemService(tgAdapter, fsAdapter, *mountpoint)
 
 	go func() {
-		if err := fsService.Serve(); err != nil {
+		if err := fileService.Server(); err != nil {
 			log.Fatalf("Error serving FUSE filesystem: %v", err)
 		}
 	}()
 
-	<-stop
+	// Handle termination signals
+	sigc := make(chan os.Signal, 1)
+	signal.Notify(sigc, syscall.SIGINT, syscall.SIGTERM)
+	<-sigc
+
 	log.Println("Shutting down the FUSE filesystem service...")
-	fsService.Shutdown()
+	if err := fileService.Shutdown(); err != nil {
+		log.Fatal(err)
+	}
+	log.Println("FUSE filesystem unmounted successfully")
 }

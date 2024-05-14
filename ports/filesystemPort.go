@@ -1,30 +1,17 @@
 package ports
 
 import (
-	"context"
-
-	"bazil.org/fuse"
-	"bazil.org/fuse/fs"
+	"github.com/dlc-01/domain"
 )
 
-// FileSystemPort defines the interface for file system operations.
-type FileSystemPort interface {
-	Root() (fs.Node, error)
-}
-
-// DirPort defines the interface for directory operations.
-type DirPort interface {
-	Attr(ctx context.Context, a *fuse.Attr) error
-	Lookup(ctx context.Context, name string) (fs.Node, error)
-	ReadDirAll(ctx context.Context) ([]fuse.Dirent, error)
-	Create(ctx context.Context, req *fuse.CreateRequest, resp *fuse.CreateResponse) (fs.Node, fs.Handle, error)
-	Remove(ctx context.Context, req *fuse.RemoveRequest) error
-}
-
-// FileNodePort defines the interface for file operations.
-type FileNodePort interface {
-	Attr(ctx context.Context, a *fuse.Attr) error
-	ReadAll(ctx context.Context) ([]byte, error)
-	Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadResponse) error
-	Write(ctx context.Context, req *fuse.WriteRequest, resp *fuse.WriteResponse) error
+type FileStoragePort interface {
+	Lookup(parentInode uint64, name string) (domain.File, error)
+	ReadDirAll(parentInode uint64) ([]domain.File, error)
+	Create(parentInode uint64, name string, mode uint32, uid uint32, gid uint32) (domain.File, error)
+	Remove(parentInode uint64, name string) error
+	UpdateTelegramID(inode uint64, telegramID string) error
+	FindMessageIDByFileID(fileID string) (int, error)
+	SaveMapping(fileID string, messageID int) error
+	Write(inode uint64, offset int64, data []byte) error
+	Read(inode uint64, offset int64, size int) ([]byte, error)
 }

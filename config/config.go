@@ -7,22 +7,23 @@ import (
 
 type Config struct {
 	TelegramToken  string `json:"telegramToken"`
-	TelegramChatID int64  `json:"telegramChatID"`
-	MappingFile    string `json:"mappingFile"`
+	TelegramChatID int64  `json:"telegramChatID""`
+	PostgresURL    string `json:"postgresUrl"`
+	MigrationDir   string `json:"migrationDir"`
 }
 
-func LoadConfig(filename string) (Config, error) {
-	var config Config
-	file, err := os.Open(filename)
+func LoadConfig(filepath string) (*Config, error) {
+	file, err := os.Open(filepath)
 	if err != nil {
-		return config, err
+		return nil, err
 	}
 	defer file.Close()
 
 	decoder := json.NewDecoder(file)
-	err = decoder.Decode(&config)
+	config := &Config{}
+	err = decoder.Decode(config)
 	if err != nil {
-		return config, err
+		return nil, err
 	}
 
 	return config, nil
