@@ -64,11 +64,9 @@ func (d Dir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 	var dirents []fuse.Dirent
 	prefix := d.Path + "/"
 	for name := range d.FileSystem.Files {
-		if len(d.Path) == 0 || name[:len(d.Path)+1] == prefix {
-			dirName := name[len(prefix):]
-			if len(dirName) > 0 && !containsSlash(dirName) {
-				dirents = append(dirents, fuse.Dirent{Name: dirName, Type: fuse.DT_File})
-			}
+		if strings.HasPrefix(name, prefix) {
+			dirName := strings.TrimPrefix(name, prefix)
+			dirents = append(dirents, fuse.Dirent{Name: dirName, Type: fuse.DT_File})
 		}
 	}
 	return dirents, nil
