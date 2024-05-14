@@ -94,7 +94,7 @@ func (d Dir) Create(ctx context.Context, req *fuse.CreateRequest, resp *fuse.Cre
 		Tag:   extractTag(fullPath),
 	}
 	d.FileSystem.Files[fullPath] = file
-
+	
 	node := FileNode{file, d.FileSystem}
 	return node, node, nil
 }

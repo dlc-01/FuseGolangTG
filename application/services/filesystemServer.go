@@ -53,8 +53,8 @@ func (s *FileSystemService) Serve() error {
 	return nil
 }
 
-func (s *FileSystemService) SaveFile(file domain.File) error {
-	telegramID, messageID, err := s.telegramService.UploadFile(file.Name, file.Content, file.Tag)
+func (s *FileSystemService) SaveFile(file domain.File, content []byte) error {
+	telegramID, messageID, err := s.telegramService.UploadFile(file.Name, content, file.Tag)
 	if err != nil {
 		return err
 	}

@@ -10,5 +10,4 @@ type File struct {
 	MTime   time.Time
 	OtherID string
 	Tag     string
-	Content []byte
 }

@@ -19,15 +19,14 @@ func TestFileSystemService_SaveFile(t *testing.T) {
 	service := NewFileSystemService(mockTelegram, fsAdapter, "./mnt")
 
 	file := domain.File{
-		Name:    "testfile.txt",
-		Content: []byte("Hello, World!"),
-		Tag:     "testtag",
+		Name: "testfile.txt",
+		Tag:  "testtag",
 	}
 
-	mockTelegram.On("UploadFile", file.Name, file.Content, file.Tag).Return("fileID123", 123, nil)
+	mockTelegram.On("UploadFile", file.Name, file.Tag).Return("fileID123", 123, nil)
 	mockTelegram.On("SaveMapping", "fileID123", 123).Return(nil)
 
-	err := service.SaveFile(file)
+	err := service.SaveFile(file, []byte("Hello, World!"))
 	assert.NoError(t, err)
 	assert.Equal(t, "fileID123", fsAdapter.Files[file.Name].OtherID)
 	mockTelegram.AssertExpectations(t)
