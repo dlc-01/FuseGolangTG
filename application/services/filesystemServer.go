@@ -5,30 +5,29 @@ import (
 	"bazil.org/fuse/fs"
 	"fmt"
 	"github.com/dlc-01/adapters/filesystem"
-	"github.com/dlc-01/domain"
-	"github.com/dlc-01/ports"
 )
 
 type FileSystemService struct {
-	telegramPort ports.TelegramPort
-	fileSystem   *filesystem.FileSystemAdapter
-	mountpoint   string
+	fileSystem *filesystem.FileSystemAdapter
+	mountpoint string
 }
 
-func NewFileSystemService(tgPort ports.TelegramPort, fileSystem *filesystem.FileSystemAdapter, mount string) *FileSystemService {
+func NewFileSystemService(fileSystem *filesystem.FileSystemAdapter, mount string) *FileSystemService {
 	return &FileSystemService{
-		telegramPort: tgPort,
-		fileSystem:   fileSystem,
-		mountpoint:   mount,
+		fileSystem: fileSystem,
+		mountpoint: mount,
 	}
 }
 
 func (s *FileSystemService) Server() error {
 	// Mount FUSE filesystem
+	fuse.Unmount(s.mountpoint)
+
 	fuseConn, err := fuse.Mount(
 		s.mountpoint,
 		fuse.FSName("telegramfs"),
 		fuse.Subtype("telegramfs"),
+		fuse.AllowOther(),
 	)
 	if err != nil {
 		return fmt.Errorf("error mounting FUSE filesystem: %w", err)
@@ -40,28 +39,7 @@ func (s *FileSystemService) Server() error {
 	if err := fs.Serve(fuseConn, filesys); err != nil {
 		return fmt.Errorf("error serving FUSE filesystem: %w", err)
 	}
-
-	//TODO красиво сделай
-	if err := fuseConn.Close(); err != nil {
-		return fmt.Errorf("mount process has exited with error: %w", err)
-	}
 	return nil
-}
-
-func (fs *FileSystemService) Lookup(parentInode uint64, name string) (domain.File, error) {
-	return fs.fileSystem.StoragePort.Lookup(parentInode, name)
-}
-
-func (fs *FileSystemService) ReadDirAll(parentInode uint64) ([]domain.File, error) {
-	return fs.fileSystem.StoragePort.ReadDirAll(parentInode)
-}
-
-func (fs *FileSystemService) Create(parentInode uint64, name string, mode uint32, uid uint32, gid uint32) (domain.File, error) {
-	return fs.fileSystem.StoragePort.Create(parentInode, name, mode, uid, gid)
-}
-
-func (fs *FileSystemService) Remove(parentInode uint64, name string) error {
-	return fs.fileSystem.StoragePort.Remove(parentInode, name)
 }
 
 func (fs *FileSystemService) ReadFile(inode uint64, offset int64, size int) ([]byte, error) {
@@ -76,7 +54,7 @@ func (fs *FileSystemService) ReadFile(inode uint64, offset int64, size int) ([]b
 	}
 
 	if len(data) == 0 {
-		return fs.telegramPort.DownloadFile(file.TelegramID)
+		return fs.fileSystem.TelegramPort.DownloadFile(file.TelegramID)
 	}
 
 	return data, nil
@@ -88,7 +66,7 @@ func (fs *FileSystemService) WriteFile(inode uint64, data []byte) error {
 		return err
 	}
 
-	telegramID, messageID, err := fs.telegramPort.UploadFile(file.Name, data, file.Tag)
+	telegramID, messageID, err := fs.fileSystem.TelegramPort.UploadFile(file.Name, data, file.Tag)
 	if err != nil {
 		return err
 	}
@@ -98,7 +76,7 @@ func (fs *FileSystemService) WriteFile(inode uint64, data []byte) error {
 		return err
 	}
 
-	return fs.telegramPort.SaveMapping(telegramID, messageID)
+	return fs.fileSystem.TelegramPort.SaveMapping(telegramID, messageID)
 }
 
 func (fs *FileSystemService) Shutdown() error {

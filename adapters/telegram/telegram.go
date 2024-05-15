@@ -47,7 +47,7 @@ func (s *TelegramAdapter) DownloadFile(fileID string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get file: %w", err)
 	}
-
+	fmt.Println(tgFile)
 	fileURL := fmt.Sprintf("https://api.telegram.org/file/bot%s/%s", s.bot.Token, tgFile.FilePath)
 	resp, err := http.Get(fileURL)
 	if err != nil {

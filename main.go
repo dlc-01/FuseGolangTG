@@ -33,9 +33,9 @@ func main() {
 		log.Fatalf("Error creating Telegram adapter: %v", err)
 	}
 
-	fsAdapter := filesystem.NewFileSystemAdapter(storageAdapter)
+	fsAdapter := filesystem.NewFileSystemAdapter(storageAdapter, tgAdapter)
 
-	fileService := services.NewFileSystemService(tgAdapter, fsAdapter, *mountpoint)
+	fileService := services.NewFileSystemService(fsAdapter, *mountpoint)
 
 	go func() {
 		if err := fileService.Server(); err != nil {

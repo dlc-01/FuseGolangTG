@@ -1,13 +1,16 @@
 package postgres
 
 import (
+	"bazil.org/fuse"
 	"database/sql"
 	"fmt"
 	"github.com/dlc-01/config"
 	"github.com/dlc-01/domain"
 	"github.com/dlc-01/migrations"
 	"github.com/dlc-01/ports"
+	"github.com/lib/pq"
 	"io/ioutil"
+	"log"
 	"time"
 
 	_ "github.com/jackc/pgx/v4/stdlib"
@@ -53,14 +56,17 @@ func (s *PostgresAdapter) Lookup(parentInode uint64, name string) (domain.File, 
 }
 
 func (s *PostgresAdapter) ReadDirAll(parentInode uint64) ([]domain.File, error) {
+
 	rows, err := s.db.Query(`
-		SELECT i.id, i.uid, i.gid, i.mode, i.mtime_ns, i.atime_ns, i.ctime_ns, i.size, i.rdev, tm.message_id
+		SELECT c.name, i.id, i.uid, i.gid, i.mode, i.mtime_ns, i.atime_ns, i.ctime_ns, i.size, i.rdev, tm.message_id
 		FROM contents c
 		JOIN inodes i ON c.inode = i.id
 		LEFT JOIN telegram_messages tm ON i.id = tm.inode
 		WHERE c.parent_inode = $1`, parentInode)
-	if err != nil {
-		return nil, err
+	if err, ok := err.(*pq.Error); ok {
+		if err.Code == "02000" {
+			return nil, fuse.ENOENT
+		}
 	}
 	defer rows.Close()
 
@@ -68,7 +74,7 @@ func (s *PostgresAdapter) ReadDirAll(parentInode uint64) ([]domain.File, error) 
 	for rows.Next() {
 		var file domain.File
 		var mtimeNs, atimeNs, ctimeNs int64
-		err := rows.Scan(&file.ID, &file.Uid, &file.Gid, &file.Mode, &mtimeNs, &atimeNs, &ctimeNs, &file.Size, &file.Rdev, &file.TelegramID)
+		err := rows.Scan(&file.Name, &file.ID, &file.Uid, &file.Gid, &file.Mode, &mtimeNs, &atimeNs, &ctimeNs, &file.Size, &file.Rdev, &file.TelegramID)
 		if err != nil {
 			return nil, err
 		}
@@ -81,25 +87,27 @@ func (s *PostgresAdapter) ReadDirAll(parentInode uint64) ([]domain.File, error) 
 	return files, nil
 }
 
-func (s *PostgresAdapter) Create(parentInode uint64, name string, mode uint32, uid uint32, gid uint32) (domain.File, error) {
+func (s *PostgresAdapter) Create(parentInode uint64, name string, mode uint32, uid uint32, gid uint32, size uint64) (domain.File, error) {
 	now := time.Now().UnixNano()
 
 	var id uint64
 	err := s.db.QueryRow(`
 		INSERT INTO inodes (uid, gid, mode, mtime_ns, atime_ns, ctime_ns, size, rdev)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		RETURNING id`, uid, gid, mode, now, now, now, 0, 0).Scan(&id)
+		RETURNING id`, uid, gid, mode, now, now, now, size, 0).Scan(&id)
 	if err != nil {
+		log.Println(err)
 		return domain.File{}, err
 	}
-
+	log.Println("insert inodes")
 	_, err = s.db.Exec(`
 		INSERT INTO contents (name, inode, parent_inode)
 		VALUES ($1, $2, $3)`, name, id, parentInode)
 	if err != nil {
+		log.Println(err)
 		return domain.File{}, err
 	}
-
+	log.Println("insert contents")
 	return domain.File{
 		ID:    id,
 		Name:  name,
@@ -134,8 +142,7 @@ func (s *PostgresAdapter) Remove(parentInode uint64, name string) error {
 func (s *PostgresAdapter) UpdateTelegramID(inode uint64, telegramID string) error {
 	_, err := s.db.Exec(`
 		INSERT INTO telegram_messages (inode, message_id)
-		VALUES ($1, $2)
-		ON CONFLICT (inode) DO UPDATE SET message_id = $2`, inode, telegramID)
+		VALUES ($1, $2)`, inode, telegramID)
 	return err
 }
 
